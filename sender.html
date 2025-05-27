@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sender</title>
+</head>
+<body>
+  <h2>Sender (Camera Streamer)</h2>
+  <video id="myVideo" autoplay muted playsinline></video>
+
+  <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <script>
+    const myVideo = document.getElementById("myVideo");
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then((stream) => {
+        myVideo.srcObject = stream;
+
+        const peer = new Peer("sender"); // fixed ID
+
+        peer.on("open", () => {
+          const call = peer.call("viewer", stream); // call viewer directly
+        });
+
+      })
+      .catch((err) => {
+        alert("Failed to get webcam access.");
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
