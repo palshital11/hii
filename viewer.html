@@ -4,21 +4,44 @@
   <title>Viewer</title>
 </head>
 <body>
-  <h2>Viewer (Sees Stream)</h2>
+  <h2>Live Video Viewer</h2>
+  <input id="peerIdInput" placeholder="Enter Sender's Peer ID" />
+  <button onclick="connect()">Connect</button>
+  <br><br>
   <video id="remoteVideo" autoplay playsinline></video>
 
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <script>
-    const remoteVideo = document.getElementById("remoteVideo");
+    const peer = new Peer();
+    const video = document.getElementById("remoteVideo");
 
-    const peer = new Peer("viewer"); // fixed ID
-
-    peer.on("call", (call) => {
-      call.answer(null); // no media from viewer
-      call.on("stream", (remoteStream) => {
-        remoteVideo.srcObject = remoteStream;
-      });
+    peer.on('open', () => {
+      console.log('Viewer Peer ready with ID:', peer.id);
     });
+
+    function connect() {
+      const senderId = document.getElementById("peerIdInput").value.trim();
+      if (!senderId) {
+        alert("Please enter sender's Peer ID");
+        return;
+      }
+      const call = peer.call(senderId, null);
+
+      call.on('stream', (remoteStream) => {
+        console.log('Received remote stream');
+        video.srcObject = remoteStream;
+      });
+
+      call.on('error', (err) => {
+        console.error('Call error:', err);
+        alert('Error connecting to sender: ' + err);
+      });
+
+      call.on('close', () => {
+        console.log('Call ended');
+        video.srcObject = null;
+      });
+    }
   </script>
 </body>
 </html>
