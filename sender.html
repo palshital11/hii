@@ -1,31 +1,41 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Sender</title>
-</head>
+<head><title>Sender</title></head>
 <body>
-  <h2>Sender (Camera Streamer)</h2>
-  <video id="myVideo" autoplay muted playsinline></video>
+  <h2>Sender</h2>
+  <button id="startBtn">Start Camera</button>
+  <video id="localVideo" autoplay muted playsinline></video>
 
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <script>
-    const myVideo = document.getElementById("myVideo");
+    const startBtn = document.getElementById('startBtn');
+    const localVideo = document.getElementById('localVideo');
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      .then((stream) => {
-        myVideo.srcObject = stream;
+    // Use a fixed peer ID for the sender
+    const peer = new Peer('sender-peer');
 
-        const peer = new Peer("sender"); // fixed ID
+    let localStream;
 
-        peer.on("open", () => {
-          const call = peer.call("viewer", stream); // call viewer directly
+    peer.on('open', () => {
+      console.log('Sender Peer is ready with ID:', peer.id);
+    });
+
+    startBtn.onclick = async () => {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        localVideo.srcObject = localStream;
+        console.log('Camera started');
+
+        // Now answer incoming calls with the local stream
+        peer.on('call', (call) => {
+          console.log('Incoming call, answering with local stream');
+          call.answer(localStream);
         });
 
-      })
-      .catch((err) => {
-        alert("Failed to get webcam access.");
-        console.error(err);
-      });
+      } catch (err) {
+        console.error('Failed to get camera', err);
+      }
+    };
   </script>
 </body>
 </html>
