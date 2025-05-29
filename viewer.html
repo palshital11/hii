@@ -23,18 +23,20 @@
     });
 
     peer.on("call", call => {
-      console.log("Incoming call from sender...");
-      call.answer(); // No media to send back
+  console.log("📞 Incoming call:", call);
+  call.answer(); // No stream to send back
 
-      call.on("stream", stream => {
-        document.getElementById("viewerVideo").srcObject = stream;
-        console.log("Stream received and set.");
-      });
+  call.on("stream", stream => {
+    console.log("📺 Stream received");
+    const video = document.getElementById("viewerVideo");
+    video.srcObject = stream;
+  });
 
-      call.on("error", err => {
-        console.error("Call error:", err);
-      });
-    });
+  call.on("error", err => {
+    console.error("❌ Call error:", err);
+  });
+});
+
 
     peer.on("error", err => console.error("Peer error:", err));
   </script>
