@@ -3,166 +3,174 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Viewer Page</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <title>Live Stream Viewer</title>
     <style>
-        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }
-        .container { background-color: #ffffff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); text-align: center; }
-        h1 { color: #333; margin-bottom: 20px; }
-        video { width: 100%; max-width: 640px; height: auto; border: 2px solid #ddd; border-radius: 8px; background-color: #000; margin-top: 20px; }
-        .status { margin-top: 20px; font-weight: bold; color: #555; }
-        .input-group { margin-top: 20px; margin-bottom: 20px; }
-        .input-group label { display: block; margin-bottom: 8px; font-size: 1.1em; color: #333; }
-        .input-group input[type="text"] { width: calc(100% - 20px); padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 1em; max-width: 300px; }
-        .input-group button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; margin-top: 10px; transition: background-color 0.3s ease; }
-        .input-group button:hover { background-color: #0056b3; }
-        .input-group button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        video {
+            width: 100%;
+            max-width: 600px;
+            background: #000;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .connected {
+            background: #dff0d8;
+            color: #3c763d;
+        }
+        .disconnected {
+            background: #f2dede;
+            color: #a94442;
+        }
+        .connecting {
+            background: #fcf8e3;
+            color: #8a6d3b;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Viewer Page (Live Feed)</h1>
-        <div class="input-group">
-            <label for="senderIdInput">Enter Sender's Peer ID:</label>
-            <input type="text" id="senderIdInput" placeholder="e.g., abcde1234567890">
-            <button id="connectBtn">Connect to Sender</button>
-        </div>
-        <div class="status" id="status">Ready</div>
-        <video id="remoteVideo" autoplay playsinline></video>
-    </div>
-
+    <h1>Live Stream Viewer</h1>
+    <p>This page will automatically connect to the sender when streaming starts.</p>
+    
+    <div id="status" class="disconnected">Waiting for stream...</div>
+    
+    <video id="remoteVideo" autoplay playsinline></video>
+    
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script>
-        let peer;
-        let currentCall = null; // To keep track of the active call
-        const remoteVideo = document.getElementById('remoteVideo');
-        const statusDiv = document.getElementById('status');
-        const senderIdInput = document.getElementById('senderIdInput');
-        const connectButton = document.getElementById('connectBtn');
+        // Configuration
+const PEER_CONFIG = {
+    host: '0.peerjs.com',
+    port: 443,
+    secure: true,
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
+        ]
+    }
+};
 
-        // Public STUN servers for NAT traversal
-        const PEER_CONFIG = {
-            host: 'peerjs.azurewebsites.net', // PeerJS Cloud server
-            secure: true,
-            port: 443,
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' },
-                ]
-            }
-        };
+// DOM elements
+const remoteVideo = document.getElementById('remoteVideo');
+const statusDiv = document.getElementById('status');
 
-        function initializePeer() {
-            console.log('Initializing PeerJS for viewer...');
-            statusDiv.innerText = 'Initializing PeerJS...';
-            // Viewer creates a new PeerJS instance without a specific ID to get a random one.
-            peer = new Peer(PEER_CONFIG);
+// PeerJS variables
+let peer;
+let connection;
+let retryInterval;
 
-            peer.on('open', (id) => {
-                console.log('My Peer ID is:', id);
-                statusDiv.innerText = `Viewer PeerJS connected. Your ID: ${id}. Enter sender's ID to connect.`;
-                connectButton.disabled = false; // Enable connect button
-            });
+// Generate a consistent peer ID based on the role 'viewer'
+const peerId = 'stream-viewer-' + Math.random().toString(36).substr(2, 9);
+const senderPeerId = 'stream-sender'; // This matches the sender's pattern
 
-            peer.on('call', (incomingCall) => {
-                console.log('Received an unexpected incoming call from:', incomingCall.peer);
-                // This scenario is unlikely for the viewer in this setup (viewer initiates),
-                // but good to have a listener for robustness.
-                statusDiv.innerText = `Unexpected incoming call from ${incomingCall.peer}. Answering...`;
-                incomingCall.answer(); // Answer with no stream, as viewer only receives
-                incomingCall.on('stream', (stream) => {
-                    console.log('Received unexpected stream from:', incomingCall.peer);
-                    remoteVideo.srcObject = stream;
-                    statusDiv.innerText = `Unexpected stream received from ${incomingCall.peer} and displayed.`;
-                });
-            });
+// Initialize PeerJS
+function initializePeer() {
+    console.log('Initializing PeerJS with ID:', peerId);
+    
+    peer = new Peer(peerId, PEER_CONFIG);
+    
+    peer.on('open', (id) => {
+        console.log('PeerJS connection opened with ID:', id);
+        statusDiv.textContent = 'Ready to receive stream';
+        statusDiv.className = 'disconnected';
+        
+        // Start trying to connect to sender
+        connectToSender();
+    });
+    
+    peer.on('error', (err) => {
+        console.error('PeerJS error:', err);
+        statusDiv.textContent = 'Error: ' + err.message;
+        statusDiv.className = 'disconnected';
+    });
+    
+    // Handle incoming data connection (for future extensions)
+    peer.on('connection', (conn) => {
+        console.log('Incoming data connection from:', conn.peer);
+        conn.on('data', (data) => {
+            console.log('Received data:', data);
+        });
+    });
+}
 
-            peer.on('error', (err) => {
-                console.error('PeerJS error:', err);
-                statusDiv.innerText = `PeerJS Error: ${err.message}`;
-                if (err.type === 'peer-unavailable') {
-                    console.warn(`The sender with the provided ID is unavailable.`);
-                    statusDiv.innerText = `Error: Sender is offline or ID is incorrect.`;
-                    connectButton.disabled = false; // Allow retrying
-                } else if (err.type === 'browser-incompatible') {
-                    statusDiv.innerText = 'Error: Your browser does not support WebRTC.';
-                }
-            });
+// Connect to the sender and request the stream
+function connectToSender() {
+    console.log('Attempting to connect to sender:', senderPeerId);
+    statusDiv.textContent = 'Connecting to sender...';
+    statusDiv.className = 'connecting';
+    
+    // Clear any existing interval
+    if (retryInterval) {
+        clearInterval(retryInterval);
+    }
+    
+    // Try to connect immediately
+    tryConnect();
+    
+    // Set up periodic connection attempts in case sender isn't available yet
+    retryInterval = setInterval(tryConnect, 5000);
+}
 
-            peer.on('disconnected', () => {
-                console.log('PeerJS disconnected. Attempting to reconnect...');
-                statusDiv.innerText = 'PeerJS Disconnected. Reconnecting...';
-                peer.reconnect();
-            });
+function tryConnect() {
+    console.log('Trying to connect to sender...');
+    
+    // Call the sender to get the stream
+    const call = peer.call(senderPeerId, null, {
+        metadata: { role: 'viewer' }
+    });
+    
+    if (!call) {
+        console.log('Call object not created - sender may not be available');
+        return;
+    }
+    
+    call.on('stream', (stream) => {
+        console.log('Received stream from sender');
+        statusDiv.textContent = 'Connected to live stream';
+        statusDiv.className = 'connected';
+        remoteVideo.srcObject = stream;
+        
+        // Clear the retry interval since we're connected
+        clearInterval(retryInterval);
+    });
+    
+    call.on('close', () => {
+        console.log('Call closed - stream ended');
+        statusDiv.textContent = 'Stream disconnected - attempting to reconnect...';
+        statusDiv.className = 'disconnected';
+        remoteVideo.srcObject = null;
+        
+        // Restart connection attempts
+        if (!retryInterval) {
+            retryInterval = setInterval(tryConnect, 5000);
         }
+    });
+    
+    call.on('error', (err) => {
+        console.error('Call error:', err);
+        statusDiv.textContent = 'Connection error: ' + (err.message || err);
+        statusDiv.className = 'disconnected';
+    });
+}
 
-        function makeCallToSender() {
-            const senderId = senderIdInput.value.trim();
-            if (!senderId) {
-                alert('Please enter the Sender\'s Peer ID.');
-                return;
-            }
-
-            if (!peer || !peer.open) {
-                console.warn('PeerJS not ready. Please wait for PeerJS initialization.');
-                statusDiv.innerText = 'PeerJS not ready. Please wait...';
-                return;
-            }
-
-            if (currentCall && currentCall.open) {
-                console.warn('Already in a call. Ending current call before initiating a new one.');
-                currentCall.close();
-            }
-
-            console.log(`Attempting to call sender with ID: ${senderId}`);
-            statusDiv.innerText = `Attempting to connect to sender (${senderId})...`;
-            connectButton.disabled = true; // Disable button during connection attempt
-
-            // Initiate a call to the sender's ID. We don't send our own stream.
-            currentCall = peer.call(senderId);
-
-            if (!currentCall) {
-                console.error('Failed to create call object. Sender might be unavailable or ID is incorrect.');
-                statusDiv.innerText = 'Error: Failed to initiate call. Sender might be offline or ID is incorrect.';
-                connectButton.disabled = false; // Re-enable button
-                return;
-            }
-
-            currentCall.on('stream', (remoteStream) => {
-                console.log('Received remote stream from sender.');
-                remoteVideo.srcObject = remoteStream;
-                statusDiv.innerText = 'Live stream connected!';
-                remoteVideo.play().catch(e => {
-                    console.error('Autoplay prevented:', e);
-                    statusDiv.innerText = 'Live stream connected! Please click video to play if autoplay is blocked.';
-                    // Show a play button or prompt user to click
-                });
-            });
-
-            currentCall.on('close', () => {
-                console.log('Call ended with sender.');
-                statusDiv.innerText = 'Live stream disconnected. Enter sender ID to connect again.';
-                remoteVideo.srcObject = null;
-                connectButton.disabled = false; // Re-enable button
-                currentCall = null;
-            });
-
-            currentCall.on('error', (err) => {
-                console.error('Call error:', err);
-                statusDiv.innerText = `Call Error: ${err.message}. Please check sender ID and try again.`;
-                remoteVideo.srcObject = null;
-                connectButton.disabled = false; // Re-enable button
-                currentCall = null;
-            });
-        }
-
-        connectButton.addEventListener('click', makeCallToSender);
-
-        // Initialize PeerJS when the page loads
-        document.addEventListener('DOMContentLoaded', initializePeer);
+// Initialize when page loads
+window.addEventListener('DOMContentLoaded', () => {
+    initializePeer();
+});
     </script>
 </body>
 </html>
