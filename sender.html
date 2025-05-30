@@ -59,7 +59,7 @@
     
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script>
-        // Configuration
+// Configuration
 const PEER_CONFIG = {
     host: '0.peerjs.com',
     port: 443,
@@ -84,9 +84,9 @@ const statusDiv = document.getElementById('status');
 // PeerJS and stream variables
 let peer;
 let localStream;
-let connection;
+let activeCalls = [];
 
-// Generate a consistent peer ID based on the role 'sender'
+// Generate a consistent peer ID
 const peerId = 'stream-sender-' + Math.random().toString(36).substr(2, 9);
 
 // Initialize PeerJS
@@ -97,33 +97,54 @@ function initializePeer() {
     
     peer.on('open', (id) => {
         console.log('PeerJS connection opened with ID:', id);
-        statusDiv.textContent = 'Ready to stream (ID: ' + id + ')';
-        statusDiv.className = 'disconnected';
+        updateStatus('Ready to stream (ID: ' + id + ')', 'disconnected');
     });
     
     peer.on('error', (err) => {
         console.error('PeerJS error:', err);
-        statusDiv.textContent = 'Error: ' + err.message;
-        statusDiv.className = 'disconnected';
+        updateStatus('Error: ' + err.message, 'disconnected');
     });
     
-    // Handle incoming data connection (for future extensions)
-    peer.on('connection', (conn) => {
-        console.log('Incoming data connection from:', conn.peer);
-        conn.on('data', (data) => {
-            console.log('Received data:', data);
-        });
-    });
-    
-    // Handle incoming call (though viewer won't call us in this setup)
+    // Handle incoming calls
     peer.on('call', (call) => {
         console.log('Incoming call from:', call.peer);
+        
+        if (!localStream) {
+            console.log('No local stream available to answer call');
+            call.close();
+            return;
+        }
+        
+        updateStatus('Viewer connecting...', 'connecting');
+        
         call.answer(localStream);
+        activeCalls.push(call);
+        
         call.on('stream', (remoteStream) => {
             console.log('Received remote stream from viewer');
             remoteVideo.srcObject = remoteStream;
+            updateStatus('Streaming to viewer', 'connected');
+        });
+        
+        call.on('close', () => {
+            console.log('Call ended with viewer');
+            activeCalls = activeCalls.filter(c => c !== call);
+            updateStatus('Viewer disconnected', 'disconnected');
+            remoteVideo.srcObject = null;
+        });
+        
+        call.on('error', (err) => {
+            console.error('Call error:', err);
+            activeCalls = activeCalls.filter(c => c !== call);
+            updateStatus('Viewer connection error', 'disconnected');
         });
     });
+}
+
+// Update status display
+function updateStatus(text, className) {
+    statusDiv.textContent = text;
+    statusDiv.className = className;
 }
 
 // Start the camera and streaming
@@ -143,28 +164,40 @@ async function startStreaming() {
         localVideo.srcObject = localStream;
         startButton.textContent = 'Streaming Started';
         
-        // Update status
-        statusDiv.textContent = 'Streaming active - waiting for viewer';
-        statusDiv.className = 'connected';
-        
-        // The viewer will initiate the connection in this setup
+        updateStatus('Streaming active - waiting for viewer', 'connected');
     } catch (err) {
         console.error('Error accessing media devices:', err);
-        statusDiv.textContent = 'Error: ' + err.message;
-        statusDiv.className = 'disconnected';
+        updateStatus('Error: ' + err.message, 'disconnected');
         startButton.disabled = false;
         startButton.textContent = 'Start Camera & Streaming';
     }
+}
+
+// Clean up resources
+function cleanup() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    
+    if (peer) {
+        peer.destroy();
+        peer = null;
+    }
+    
+    activeCalls.forEach(call => call.close());
+    activeCalls = [];
 }
 
 // Initialize when page loads
 window.addEventListener('DOMContentLoaded', () => {
     initializePeer();
     
-    startButton.addEventListener('click', () => {
-        startStreaming();
-    });
+    startButton.addEventListener('click', startStreaming);
 });
-    </script>
+
+// Clean up when page unloads
+window.addEventListener('beforeunload', cleanup);
+</script>
 </body>
 </html>
