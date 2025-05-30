@@ -1,47 +1,165 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Sender</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sender Page</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }
+        .container { background-color: #ffffff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); text-align: center; }
+        h1 { color: #333; margin-bottom: 20px; }
+        video { width: 100%; max-width: 640px; height: auto; border: 2px solid #ddd; border-radius: 8px; background-color: #000; margin-top: 20px; }
+        button { background-color: #007bff; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; transition: background-color 0.3s ease; }
+        button:hover { background-color: #0056b3; }
+        .status { margin-top: 20px; font-weight: bold; color: #555; }
+        .peer-id-display { margin-top: 15px; font-size: 1.1em; color: #333; }
+        .peer-id-display span { font-weight: bold; color: #007bff; word-break: break-all; }
+        #copyBtn { margin-left: 10px; padding: 5px 10px; font-size: 0.9em; background-color: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        #copyBtn:hover { background-color: #218838; }
+        #copyBtn:disabled { background-color: #cccccc; cursor: not-allowed; }
+    </style>
 </head>
 <body>
-  <h2>Sender (Camera Stream)</h2>
-  <video id="senderVideo" autoplay muted playsinline></video>
+    <div class="container">
+        <h1>Sender Page (Your Camera)</h1>
+        <div class="peer-id-display">
+            Your Peer ID: <span id="senderPeerId">Generating...</span>
+            <button id="copyBtn" disabled>Copy</button>
+            <p style="font-size: 0.9em; color: #666;">Share this ID with the viewer.</p>
+        </div>
+        <button id="startCamera">Start Camera & Wait for Viewer</button>
+        <div class="status" id="status">Ready</div>
+        <video id="localVideo" autoplay muted></video>
+    </div>
 
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-  <script>
-    const peer = new Peer("sender", {
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" }
-        ]
-      },
-      debug: 3
-    });
+    <script>
+        let peer;
+        let localStream;
+        const localVideo = document.getElementById('localVideo');
+        const startCameraButton = document.getElementById('startCamera');
+        const statusDiv = document.getElementById('status');
+        const senderPeerIdSpan = document.getElementById('senderPeerId');
+        const copyButton = document.getElementById('copyBtn');
 
-    peer.on("open", id => {
-      console.log("Sender peer open with ID:", id);
-      startCameraAndCallViewer();
-    });
+        // Public STUN servers for NAT traversal
+        const PEER_CONFIG = {
+            host: 'peerjs.azurewebsites.net', // PeerJS Cloud server (you can also run your own)
+            secure: true,
+            port: 443,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' },
+                ]
+            }
+        };
 
-    function startCameraAndCallViewer() {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then(stream => {
-          document.getElementById("senderVideo").srcObject = stream;
+        function initializePeer() {
+            console.log('Initializing PeerJS...');
+            statusDiv.innerText = 'Initializing PeerJS...';
+            // Create a new PeerJS instance without a specific ID to get a random one.
+            peer = new Peer(PEER_CONFIG);
 
-          // Call viewer
-          const call = peer.call("viewer", stream);
-          console.log("Calling viewer...");
+            peer.on('open', (id) => {
+                console.log('My Peer ID is:', id);
+                senderPeerIdSpan.innerText = id;
+                copyButton.disabled = false;
+                statusDiv.innerText = `PeerJS connected. Your ID is ${id}. Click "Start Camera" and share this ID.`;
+                startCameraButton.disabled = false; // Enable the button once peer is ready
+            });
 
-          call.on("error", err => {
-            console.error("Call error:", err);
-          });
-        })
-        .catch(error => {
-          console.error("Camera access error:", error);
+            peer.on('call', (call) => {
+                console.log('Received a call from:', call.peer);
+                statusDiv.innerText = `Receiving call from ${call.peer}. Answering...`;
+                // Answer the call with your local media stream
+                if (localStream) {
+                    call.answer(localStream);
+                    console.log('Answered call with local stream.');
+                    statusDiv.innerText = `Streaming to ${call.peer}.`;
+                } else {
+                    console.error('No local stream available to answer the call. Please click "Start Camera" first.');
+                    statusDiv.innerText = 'Error: No local stream to answer the call. Start camera first.';
+                    // If no stream, answer with null to indicate call accepted but no media
+                    call.answer();
+                    call.on('stream', () => { /* no-op for sender */ });
+                }
+
+                call.on('close', () => {
+                    console.log('Call ended with', call.peer);
+                    statusDiv.innerText = `Call ended with ${call.peer}. Waiting for new calls...`;
+                });
+
+                call.on('error', (err) => {
+                    console.error('Call error:', err);
+                    statusDiv.innerText = `Call error with ${call.peer}: ${err.message}`;
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                statusDiv.innerText = `PeerJS Error: ${err.message}`;
+                if (err.type === 'peer-unavailable') {
+                    console.warn('Peer ID might be in use or connection issue. This typically means the ID you are trying to connect to is not available.');
+                }
+            });
+
+            peer.on('disconnected', () => {
+                console.log('PeerJS disconnected. Attempting to reconnect...');
+                statusDiv.innerText = 'PeerJS Disconnected. Reconnecting...';
+                peer.reconnect();
+            });
+        }
+
+        async function startCameraAndPrepareStream() {
+            if (localStream) {
+                console.warn('Camera already started.');
+                statusDiv.innerText = 'Camera already active. Share your ID and wait for viewer.';
+                return;
+            }
+            try {
+                console.log('Requesting camera access...');
+                statusDiv.innerText = 'Requesting camera access...';
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                console.log('Camera started successfully.');
+                statusDiv.innerText = `Camera started. Share your ID (${senderPeerIdSpan.innerText}) with the viewer and wait for connection.`;
+
+                // If PeerJS is already open, and a viewer calls, the stream will be sent.
+                // We don't initiate a call here; the viewer will initiate it.
+
+            } catch (err) {
+                console.error('Failed to get local stream:', err);
+                statusDiv.innerText = `Error: Could not access camera. ${err.message}`;
+                alert(`Error: Could not access camera. Please ensure camera permissions are granted. ${err.message}`);
+                startCameraButton.disabled = false; // Re-enable button on error
+            }
+        }
+
+        copyButton.addEventListener('click', () => {
+            const peerId = senderPeerIdSpan.innerText;
+            navigator.clipboard.writeText(peerId)
+                .then(() => {
+                    console.log('Peer ID copied to clipboard:', peerId);
+                    const originalText = copyButton.innerText;
+                    copyButton.innerText = 'Copied!';
+                    setTimeout(() => {
+                        copyButton.innerText = originalText;
+                    }, 2000);
+                })
+                .catch(err => {
+                    console.error('Failed to copy Peer ID:', err);
+                    alert('Failed to copy Peer ID. Please copy manually: ' + peerId);
+                });
         });
-    }
 
-    peer.on("error", err => console.error("Peer error:", err));
-  </script>
+        startCameraButton.addEventListener('click', startCameraAndPrepareStream);
+
+        // Initialize PeerJS when the page loads
+        document.addEventListener('DOMContentLoaded', initializePeer);
+    </script>
 </body>
 </html>
